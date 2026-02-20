@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luzi und der verwunschene Wald 🌸</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Georgia', serif;
+    overflow: hidden;
+  }
+  #game-container {
+    position: relative;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 0 60px rgba(255,150,255,0.4), 0 0 120px rgba(100,50,200,0.3);
+  }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+const CANVAS_W = 800;
+const CANVAS_H = 450;
+const canvas = document.getElementById('gameCanvas');
+canvas.width = CANVAS_W;
+canvas.height = CANVAS_H;
+const ctx = canvas.getContext('2d');
+
+// ═══════════════════════════════════════════════════
+// 🔊  AUDIO ENGINE  (Web Audio API – kein Download!)
+// ═══════════════════════════════════════════════════
+let audioCtx = null;
+let musicRunning = false;
+
+function getAC() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+// Master-Lautstärke
+const MASTER_VOL = 0.45;
+function masterOut() {
+  const ac = getAC();
+  if (!masterOut._g) {
+    masterOut._g = ac.createGain();
+    masterOut._g.gain.value = MASTER_VOL;
+    masterOut._g.connect(ac.destination);
+  }
+  return masterOut._g;
+}
+
+// ── 🎺  Törööö!  Elefantentrompete ─────────────────
+function playTrompete() {
+  const ac = getAC();
+  const g = ac.createGain();
+  g.connect(masterOut());
+
+  // Kurze Auftakt-Pffffts
+  [[300,0],[420,0.07],[550,0.14],[380,0.22]].forEach(([f,t]) => {
+    const o = ac.createOscillator(), og = ac.createGain();
+    o.type = 'sawtooth'; o.frequency.value = f;
+    og.gain.setValueAtTime(0, ac.currentTime+t);
+    og.gain.linearRampToValueAtTime(0.15, ac.currentTime+t+0.025);
+    og.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+t+0.09);
+    o.connect(og); og.connect(g);
+    o.start(ac.currentTime+t); o.stop(ac.currentTime+t+0.12);
+  });
+
+  // Das lange Törööö
+  const o2 = ac.createOscillator(), og2 = ac.createGain();
+  o2.type = 'sawtooth';
+  o2.frequency.setValueAtTime(300, ac.currentTime+0.28);
+  o2.frequency.exponentialRampToValueAtTime(560, ac.currentTime+0.55);
+  o2.frequency.exponentialRampToValueAtTime(180, ac.currentTime+1.0);
+  og2.gain.setValueAtTime(0, ac.currentTime+0.28);
+  og2.gain.linearRampToValueAtTime(0.24, ac.currentTime+0.34);
+  og2.gain.setValueAtTime(0.24, ac.currentTime+0.55);
+  og2.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+1.05);
+  o2.connect(og2); og2.connect(g);
+  o2.start(ac.currentTime+0.28); o2.stop(ac.currentTime+1.1);
+
+  // Oberton für Wärme
+  const o3 = ac.createOscillator(), og3 = ac.createGain();
+  o3.type = 'square';
+  o3.frequency.setValueAtTime(600, ac.currentTime+0.28);
+  o3.frequency.exponentialRampToValueAtTime(1120, ac.currentTime+0.55);
+  o3.frequency.exponentialRampToValueAtTime(360, ac.currentTime+1.0);
+  og3.gain.setValueAtTime(0, ac.currentTime+0.28);
+  og3.gain.linearRampToValueAtTime(0.06, ac.currentTime+0.34);
+  og3.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+1.05);
+  o3.connect(og3); og3.connect(g);
+  o3.start(ac.currentTime+0.28); o3.stop(ac.currentTime+1.1);
+}
+
+// ── 💨  Blumen-Abschuss Whoosh ──────────────────────
+function playWhoosh() {
+  const ac = getAC();
+  // Noise-Burst
+  const len = Math.floor(ac.sampleRate * 0.12);
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const d   = buf.getChannelData(0);
+  for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*(1-i/len);
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const bpf = ac.createBiquadFilter();
+  bpf.type = 'bandpass'; bpf.frequency.value = 1200; bpf.Q.value = 1.2;
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.2, ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.14);
+  src.connect(bpf); bpf.connect(g); g.connect(masterOut()); src.start();
+
+  // Magisches Pling dazu
+  const o = ac.createOscillator(), og = ac.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(1046, ac.currentTime);
+  o.frequency.exponentialRampToValueAtTime(1760, ac.currentTime+0.1);
+  og.gain.setValueAtTime(0.09, ac.currentTime);
+  og.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.14);
+  o.connect(og); og.connect(masterOut());
+  o.start(); o.stop(ac.currentTime+0.15);
+}
+
+// ── 💥  Blumen trifft Gegner ────────────────────────
+function playHit() {
+  const ac = getAC();
+  // Fröhliche Dur-Arpeggio
+  [523,659,784,1047].forEach((freq,i) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    const t = ac.currentTime + i*0.055;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.14, t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, t+0.18);
+    o.connect(g); g.connect(masterOut());
+    o.start(t); o.stop(t+0.2);
+  });
+  // Knall
+  const len = Math.floor(ac.sampleRate*0.07);
+  const buf = ac.createBuffer(1,len,ac.sampleRate);
+  const d   = buf.getChannelData(0);
+  for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*(1-i/len)*0.6;
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const g2 = ac.createGain(); g2.gain.value = 0.18;
+  src.connect(g2); g2.connect(masterOut()); src.start();
+}
+
+// ── 😵  Luzi Ohnmacht ───────────────────────────────
+function playOuch() {
+  const ac = getAC();
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(440, ac.currentTime);
+  o.frequency.exponentialRampToValueAtTime(160, ac.currentTime+0.5);
+  g.gain.setValueAtTime(0.22, ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.55);
+  o.connect(g); g.connect(masterOut());
+  o.start(); o.stop(ac.currentTime+0.6);
+}
+
+// ── 🎉  Level Complete ──────────────────────────────
+function playLevelComplete() {
+  const ac = getAC();
+  const mel = [523,659,784,1047,784,1047,1319];
+  const dur = [0.12,0.12,0.12,0.2,0.1,0.1,0.5];
+  let t = ac.currentTime;
+  mel.forEach((f,i) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type='triangle'; o.frequency.value=f;
+    g.gain.setValueAtTime(0.18,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur[i]);
+    o.connect(g); g.connect(masterOut());
+    o.start(t); o.stop(t+dur[i]+0.05);
+    t += dur[i];
+  });
+}
+
+// ════════════════════════════════════════════════════
+// 🎵  HINTERGRUNDMUSIK  – fröhlich, kindgerecht
+//     Glockenspiel-Walzer in C-Dur
+// ════════════════════════════════════════════════════
+function startMusic() {
+  if (musicRunning) return;
+  musicRunning = true;
+  const ac = getAC();
+
+  // Melodie: fröhliche C-Dur Phrasen
+  const MEL = [
+    523,659,784,659, 523,659,523,392,
+    440,523,659,523, 440,523,440,349,
+    392,523,659,784, 880,784,659,523,
+    659,784,880,784, 659,523,392,523,
+    523,659,784,880, 1047,880,784,659,
+    784,659,523,440, 523,440,392,349,
+    392,523,659,523, 392,349,330,294,
+    330,392,523,659, 784,659,523,392,
+  ];
+  const NOTE = 0.16; // Notenlänge in Sekunden
+  let idx = 0;
+
+  function tick() {
+    if (!musicRunning) return;
+    const ac2 = getAC();
+    const freq = MEL[idx % MEL.length];
+    const now  = ac2.currentTime;
+
+    // Glocken-Ton (Hauptmelodie)
+    const o = ac2.createOscillator(), g = ac2.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.055, now+0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, now+NOTE*1.6);
+    o.connect(g); g.connect(masterOut());
+    o.start(now); o.stop(now+NOTE*1.8);
+
+    // Shimmer-Oberton
+    const o2 = ac2.createOscillator(), g2 = ac2.createGain();
+    o2.type = 'triangle'; o2.frequency.value = freq*2;
+    g2.gain.setValueAtTime(0, now);
+    g2.gain.linearRampToValueAtTime(0.018, now+0.01);
+    g2.gain.exponentialRampToValueAtTime(0.001, now+NOTE);
+    o2.connect(g2); g2.connect(masterOut());
+    o2.start(now); o2.stop(now+NOTE+0.05);
+
+    idx++;
+    setTimeout(tick, NOTE*1000);
+  }
+
+  // Bass – alle 4 Noten
+  const BASS = [130,130,146,164,130,130,146,164,110,130,146,164,130,146,164,130];
+  let bi = 0;
+  function bassT() {
+    if (!musicRunning) return;
+    const ac2 = getAC();
+    const now  = ac2.currentTime;
+    const f    = BASS[bi % BASS.length];
+    const o = ac2.createOscillator(), g = ac2.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.065, now+0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, now+NOTE*4);
+    o.connect(g); g.connect(masterOut());
+    o.start(now); o.stop(now+NOTE*4+0.05);
+    bi++;
+    setTimeout(bassT, NOTE*4*1000);
+  }
+
+  // Walzer-Hintergrundakkorde
+  const CHORDS = [[523,659,784],[440,554,659],[349,440,523],[392,494,587]];
+  let ci = 0;
+  function chordT() {
+    if (!musicRunning) return;
+    const ac2 = getAC();
+    const now  = ac2.currentTime;
+    const ch   = CHORDS[ci % CHORDS.length];
+    ch.forEach(f => {
+      const o = ac2.createOscillator(), g = ac2.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.018, now+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now+NOTE*8);
+      o.connect(g); g.connect(masterOut());
+      o.start(now); o.stop(now+NOTE*8+0.05);
+    });
+    ci++;
+    setTimeout(chordT, NOTE*8*1000);
+  }
+
+  tick();
+  bassT();
+  chordT();
+}
+
+function stopMusic() { musicRunning = false; }
+
+// ═══════════════════════════════════════════════════
+// 🎮  GAME STATE
+// ═══════════════════════════════════════════════════
+const STATE = { MENU:'menu', PLAYING:'playing', LEVEL_COMPLETE:'level_complete', GAME_OVER:'game_over', WIN:'win' };
+let gameState = STATE.MENU;
+let currentLevel = 0;
+let bloomProgress = 0;
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  // Erster Tastendruck startet AudioContext (Browser-Policy)
+  if (!audioCtx) { getAC(); startMusic(); }
+  if (gameState===STATE.MENU && e.key==='Enter')              { startGame(); }
+  if (gameState===STATE.LEVEL_COMPLETE && e.key==='Enter')    {
+    currentLevel++;
+    if (currentLevel>=levels.length) { gameState=STATE.WIN; playLevelComplete(); return; }
+    loadLevel(currentLevel);
+  }
+  if (gameState===STATE.GAME_OVER && e.key==='Enter')         { loadLevel(currentLevel); }
+  if (gameState===STATE.WIN && e.key==='Enter')               { currentLevel=0; gameState=STATE.MENU; }
+});
+window.addEventListener('keyup', e => { keys[e.key]=false; });
+
+// ─── PLAYER ──────────────────────────────────────────────────
+const luzi = {
+  x:80, y:340, w:52, h:46,
+  vx:0, vy:0, onGround:false,
+  lives:3, facing:1,
+  invincible:0, knockedOut:0,
+  shootCooldown:0, frame:0, frameTimer:0,
+};
+
+let flowers=[], enemies=[], platforms=[], particles=[];
+
+// ─── LEVEL DEFINITIONS ───────────────────────────────────────
+const levels = [
+  {
+    name:"Der Graue Hain",
+    bgColor:['#2d1b4e','#1a2a1a'],
+    treesGray:true,
+    platforms:[
+      {x:0,   y:400, w:800, h:50},
+      {x:150, y:320, w:100, h:16},
+      {x:350, y:270, w:120, h:16},
+      {x:550, y:310, w:100, h:16},
+      {x:680, y:230, w:110, h:16},
+    ],
+    enemies:[
+      {x:300, y:364, type:'mushroom', dir:1,  speed:1.2},
+      {x:500, y:364, type:'mushroom', dir:-1, speed:1.4},
+      {x:690, y:194, type:'mushroom', dir:1,  speed:1.0},
+    ],
+  },
+  {
+    name:"Der Schlafende Fluss",
+    bgColor:['#1a1a3e','#0d2233'],
+    iceEffect:true,
+    platforms:[
+      {x:0,   y:400, w:800, h:50},
+      {x:240, y:355, w:90,  h:16},
+      {x:390, y:310, w:90,  h:16},
+      {x:540, y:270, w:90,  h:16},
+      {x:670, y:330, w:120, h:16},
+    ],
+    enemies:[
+      {x:250, y:322, type:'crow', dir:1,  speed:2.0, floatY:322, floatRange:22},
+      {x:545, y:238, type:'crow', dir:-1, speed:2.2, floatY:238, floatRange:28},
+      {x:395, y:278, type:'crow', dir:1,  speed:1.8, floatY:278, floatRange:18},
+    ],
+  },
+  {
+    name:"Das Herz des Waldes",
+    bgColor:['#0d0d1a','#1a0d2e'],
+    darkEffect:true,
+    platforms:[
+      {x:0,   y:400, w:800, h:50},
+      {x:100, y:310, w:120, h:16},
+      {x:300, y:260, w:100, h:16},
+      {x:480, y:310, w:100, h:16},
+      {x:620, y:240, w:130, h:16},
+    ],
+    enemies:[
+      {x:200, y:364, type:'shadow', dir:1,  speed:1.5},
+      {x:500, y:364, type:'shadow', dir:-1, speed:1.7},
+      {x:650, y:204, type:'boss',   dir:1,  speed:2.2, hp:3},
+    ],
+  },
+];
+
+// ─── LOAD ────────────────────────────────────────────────────
+function startGame() { currentLevel=0; startMusic(); loadLevel(0); }
+
+function loadLevel(idx) {
+  bloomProgress=0; flowers=[]; particles=[];
+  luzi.x=80; luzi.y=340; luzi.vx=0; luzi.vy=0;
+  luzi.lives=3; luzi.invincible=0; luzi.knockedOut=0; luzi.facing=1;
+  platforms = levels[idx].platforms.map(p=>({...p}));
+  enemies   = levels[idx].enemies.map(e=>({
+    ...e, alive:true, hp:e.hp||1, invincible:0,
+    w:38, h:38,
+    floatTimer:Math.random()*Math.PI*2,
+  }));
+  gameState = STATE.PLAYING;
+}
+
+// ─── PHYSICS ─────────────────────────────────────────────────
+const GRAVITY=0.55, JUMP=-13, SPEED=3.5;
+
+function overlap(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+
+function resolveGround(obj) {
+  obj.onGround = false;
+  platforms.forEach(p => {
+    if (!p.invisible &&
+        obj.x+obj.w > p.x && obj.x < p.x+p.w &&
+        obj.vy >= 0 &&
+        obj.y+obj.h >= p.y && obj.y+obj.h <= p.y+24) {
+      obj.y = p.y - obj.h;
+      obj.vy = 0;
+      obj.onGround = true;
+    }
+  });
+}
+
+function updateLuzi(dt) {
+  if (luzi.knockedOut > 0) {
+    luzi.knockedOut -= dt;
+    luzi.vy += GRAVITY; luzi.y += luzi.vy;
+    resolveGround(luzi);
+    if (luzi.invincible>0) luzi.invincible-=dt;
+    return;
+  }
+
+  let moving=false;
+  if (keys['ArrowLeft'])       { luzi.vx=-SPEED; luzi.facing=-1; moving=true; }
+  else if (keys['ArrowRight']) { luzi.vx= SPEED; luzi.facing= 1; moving=true; }
+  else luzi.vx*=0.7;
+
+  if (keys['ArrowUp'] && luzi.onGround) {
+    luzi.vy=JUMP; luzi.onGround=false;
+    spawnP(luzi.x+luzi.w/2, luzi.y+luzi.h, 4,'#aaffaa',2);
+  }
+  if (keys['ArrowDown'] && luzi.shootCooldown<=0) { shootFlower(); luzi.shootCooldown=22; }
+  if (luzi.shootCooldown>0) luzi.shootCooldown-=dt;
+
+  luzi.vy+=GRAVITY; luzi.x+=luzi.vx; luzi.y+=luzi.vy;
+  luzi.x=Math.max(0,Math.min(CANVAS_W-luzi.w,luzi.x));
+  if (luzi.y>CANVAS_H+60){ hitLuzi(); luzi.x=80; luzi.y=300; luzi.vy=0; }
+  resolveGround(luzi);
+  // Head bump
+  platforms.forEach(p=>{
+    if (luzi.x+luzi.w>p.x && luzi.x<p.x+p.w && luzi.vy<0 &&
+        luzi.y<=p.y+p.h && luzi.y>=p.y+p.h-12){ luzi.y=p.y+p.h; luzi.vy=0; }
+  });
+
+  if (moving||!luzi.onGround){ luzi.frameTimer++; if(luzi.frameTimer>8){luzi.frameTimer=0;luzi.frame=(luzi.frame+1)%4;} }
+  else luzi.frame=0;
+  if (luzi.invincible>0) luzi.invincible-=dt;
+}
+
+function shootFlower() {
+  playTrompete();
+  setTimeout(playWhoosh, 320);
+  const tipX = luzi.x+(luzi.facing>0?luzi.w+4:-8);
+  const tipY = luzi.y+8;
+  flowers.push({x:tipX,y:tipY,w:16,h:16,vx:luzi.facing*9,vy:0,alive:true,spin:0});
+  spawnP(tipX,tipY,6,'#ff88cc',3);
+}
+
+function hitLuzi() {
+  if (luzi.invincible>0) return;
+  playOuch();
+  luzi.lives--;
+  luzi.invincible=120; luzi.knockedOut=80; luzi.vy=-9;
+  spawnP(luzi.x+luzi.w/2,luzi.y+luzi.h/2,14,'#ff6688',4);
+  if (luzi.lives<=0) gameState=STATE.GAME_OVER;
+}
+
+function updateEnemies(dt) {
+  enemies.forEach(e=>{
+    if (!e.alive) return;
+    if (e.invincible>0) e.invincible-=dt;
+
+    if (e.type==='mushroom'||e.type==='shadow'){
+      e.x+=e.dir*e.speed;
+      if (e.x<10||e.x>CANVAS_W-50) e.dir*=-1;
+    } else if (e.type==='crow'){
+      e.floatTimer+=0.05;
+      e.x+=e.dir*e.speed;
+      e.y=e.floatY+Math.sin(e.floatTimer)*e.floatRange;
+      if (e.x<10||e.x>CANVAS_W-50) e.dir*=-1;
+    } else if (e.type==='boss'){
+      e.x+=e.dir*e.speed;
+      if (e.x<580||e.x>CANVAS_W-70) e.dir*=-1;
+      if (Math.abs(luzi.x-e.x)<200) e.x+=(luzi.x>e.x?0.5:-0.5);
+    }
+
+    const er={x:e.x,y:e.y,w:e.w,h:e.h};
+    const lr={x:luzi.x,y:luzi.y,w:luzi.w,h:luzi.h};
+    if (overlap(er,lr)) hitLuzi();
+  });
+}
+
+function updateFlowers(dt) {
+  flowers.forEach(f=>{
+    if (!f.alive) return;
+    f.x+=f.vx; f.y+=f.vy; f.spin+=0.22;
+    if (f.x<-40||f.x>CANVAS_W+40||f.y<-40||f.y>CANVAS_H+40){ f.alive=false; return; }
+
+    enemies.forEach(e=>{
+      if (!e.alive||e.invincible>0) return;
+      // Großzügige Hitbox — Bodengegner gut treffbar
+      const eHit={x:e.x-4, y:e.y-4, w:e.w+8, h:e.h+8};
+      const fHit={x:f.x-6, y:f.y-6, w:f.w+12, h:f.h+12};
+      if (overlap(eHit,fHit)){
+        f.alive=false;
+        playHit();
+        spawnP(e.x+e.w/2,e.y+e.h/2,15,'#ff88cc',4);
+        spawnP(e.x+e.w/2,e.y+e.h/2,9,'#ffcc00',3);
+        e.hp--;
+        if (e.hp<=0){
+          e.alive=false;
+          // Verteile 100% gleichmäßig auf alle Gegner des Levels
+          const totalEnemies = levels[currentLevel].enemies.length;
+          bloomProgress += Math.ceil(100 / totalEnemies);
+          if(bloomProgress>100) bloomProgress=100;
+        } else { e.invincible=55; }
+      }
+    });
+  });
+  flowers=flowers.filter(f=>f.alive);
+
+  if (bloomProgress>=100&&gameState===STATE.PLAYING){
+    playLevelComplete();
+    for(let i=0;i<32;i++) spawnP(
+      Math.random()*CANVAS_W,Math.random()*CANVAS_H,
+      3,['#ff88cc','#ffcc00','#aaffaa','#88ccff'][i%4],5
+    );
+    gameState=STATE.LEVEL_COMPLETE;
+  }
+}
+
+function spawnP(x,y,n,color,spd){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2, s=spd*(0.5+Math.random());
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2,life:1,color,size:3+Math.random()*4});
+  }
+}
+function updateParticles(){
+  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.1;p.life-=0.025;});
+  particles=particles.filter(p=>p.life>0);
+}
+
+// ═══════════════════════════════════════════════════
+// 🎨  DRAW
+// ═══════════════════════════════════════════════════
+function drawBG(){
+  const lvl=levels[currentLevel];
+  const [c1,c2]=lvl.bgColor;
+  const gr=ctx.createLinearGradient(0,0,0,CANVAS_H);
+  gr.addColorStop(0,c1); gr.addColorStop(1,c2);
+  ctx.fillStyle=gr; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  // Sterne
+  const seed=currentLevel*13;
+  ctx.fillStyle='rgba(255,255,255,0.45)';
+  for(let i=0;i<40;i++){
+    ctx.beginPath();
+    ctx.arc((seed+i*137)%CANVAS_W,(seed+i*97)%300,0.5+(i%3)*0.5,0,Math.PI*2);
+    ctx.fill();
+  }
+  drawTrees(lvl);
+  if(lvl.darkEffect){
+    const vig=ctx.createRadialGradient(CANVAS_W/2,CANVAS_H/2,80,CANVAS_W/2,CANVAS_H/2,CANVAS_W*0.75);
+    vig.addColorStop(0,'rgba(0,0,0,0)'); vig.addColorStop(1,'rgba(0,0,0,0.72)');
+    ctx.fillStyle=vig; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  }
+}
+
+function drawTrees(lvl){
+  [50,170,400,600,720].forEach(tx=>{
+    const bl=bloomProgress/100, gray=lvl.treesGray;
+    ctx.fillStyle=gray&&bl<0.5?'#555':'#5c3d1e';
+    ctx.fillRect(tx+10,310,12,90);
+    [['#2d6a2d','#ff88cc'],['#3a8a3a','#ff66aa'],['#4aaa4a','#ffaadd']].forEach(([base,bloom],l)=>{
+      ctx.fillStyle=bl>l*0.33?bloom:(gray?'#777':base);
+      ctx.globalAlpha=0.88;
+      ctx.beginPath(); ctx.arc(tx+16,318-l*22,20-l*2,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha=1;
+    if(lvl.darkEffect){
+      ctx.fillStyle='#aa44ff'; ctx.globalAlpha=0.6;
+      ctx.beginPath(); ctx.arc(tx+16,305,5,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  });
+}
+
+function drawPlatforms(){
+  const lvl=levels[currentLevel];
+  platforms.forEach(p=>{
+    if(p.invisible) return;
+    let t,b;
+    if(lvl.iceEffect)       {t='#aaddff';b='#6699bb';}
+    else if(lvl.darkEffect) {t='#4a2a6a';b='#2a1a3a';}
+    else                    {t='#5a8a3a';b='#3a5a2a';}
+    const g=ctx.createLinearGradient(p.x,p.y,p.x,p.y+p.h);
+    g.addColorStop(0,t); g.addColorStop(1,b);
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.roundRect(p.x,p.y,p.w,p.h,p.h>30?0:8); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fillRect(p.x+2,p.y,p.w-4,4);
+    if(!lvl.iceEffect&&!lvl.darkEffect&&bloomProgress>25){
+      ctx.fillStyle='#ff88cc';
+      for(let gx=p.x+10;gx<p.x+p.w-10;gx+=18){
+        ctx.beginPath(); ctx.arc(gx,p.y-3,3*(bloomProgress/100),0,Math.PI*2); ctx.fill();
+      }
+    }
+    if(lvl.darkEffect){
+      ctx.fillStyle='#aa44ff'; ctx.globalAlpha=0.65;
+      for(let gx=p.x+14;gx<p.x+p.w-14;gx+=24){
+        ctx.beginPath(); ctx.arc(gx,p.y-5,4,0,Math.PI*2); ctx.fill();
+      }
+      ctx.globalAlpha=1;
+    }
+  });
+}
+
+function tinyFlower(x,y,color,sz){
+  ctx.save(); ctx.translate(x,y);
+  ctx.fillStyle=color;
+  for(let i=0;i<5;i++){
+    ctx.save(); ctx.rotate(i*Math.PI*2/5);
+    ctx.beginPath(); ctx.ellipse(0,-sz*0.6,sz*0.3,sz*0.5,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle='#ffee44'; ctx.beginPath(); ctx.arc(0,0,sz*0.35,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawLuzi(){
+  const fl=luzi.invincible>0&&Math.floor(luzi.invincible/6)%2===0;
+  if(fl) return;
+  const ko=luzi.knockedOut>0;
+  ctx.save();
+  ctx.translate(luzi.x+luzi.w/2,luzi.y+luzi.h/2);
+  if(luzi.facing<0) ctx.scale(-1,1);
+  // Schatten
+  ctx.fillStyle='rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(0,luzi.h/2+2,luzi.w*0.4,6,0,0,Math.PI*2); ctx.fill();
+  // Beine
+  const ls=Math.sin(luzi.frame*Math.PI/2)*(ko?0:5);
+  ctx.fillStyle='#c8a0e0';
+  ctx.beginPath(); ctx.roundRect(-18,10+ls,12,16,4); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(6,10-ls,12,16,4); ctx.fill();
+  // Körper
+  const bg=ctx.createRadialGradient(-4,-4,4,0,0,24);
+  bg.addColorStop(0,'#e8c0f8'); bg.addColorStop(1,'#b080d0');
+  ctx.fillStyle=bg; ctx.beginPath(); ctx.ellipse(0,2,22,20,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.ellipse(-2,4,10,8,0,0,Math.PI*2); ctx.fill();
+  // Kopf
+  const hg=ctx.createRadialGradient(-2,-18,3,0,-20,16);
+  hg.addColorStop(0,'#eecaff'); hg.addColorStop(1,'#bb88dd');
+  ctx.fillStyle=hg; ctx.beginPath(); ctx.ellipse(0,-20,17,15,0,0,Math.PI*2); ctx.fill();
+  // Ohren
+  ctx.fillStyle='#cc99ee'; ctx.beginPath(); ctx.ellipse(-15,-24,8,10,Math.PI*0.3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ffbbdd'; ctx.beginPath(); ctx.ellipse(-14,-23,4,6,Math.PI*0.3,0,Math.PI*2); ctx.fill();
+  // Auge
+  if(ko){
+    ctx.strokeStyle='#442255'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(5,-24); ctx.lineTo(9,-20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(9,-24); ctx.lineTo(5,-20); ctx.stroke();
+  }else{
+    ctx.fillStyle='#442255'; ctx.beginPath(); ctx.arc(7,-22,3.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(8,-23,1.2,0,Math.PI*2); ctx.fill();
+  }
+  // Rüssel
+  ctx.strokeStyle='#cc99ee'; ctx.lineWidth=6; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(14,-18); ctx.quadraticCurveTo(24,-18,22,-10); ctx.stroke();
+  ctx.fillStyle='#cc99ee'; ctx.beginPath(); ctx.arc(22,-10,4,0,Math.PI*2); ctx.fill();
+  // Blume
+  tinyFlower(0,-36,'#ffaadd',6);
+  ctx.restore();
+}
+
+function drawEnemies(){
+  enemies.forEach(e=>{
+    if(!e.alive) return;
+    if(e.invincible>0&&Math.floor(e.invincible/5)%2===0) return;
+    ctx.save();
+    ctx.translate(e.x+e.w/2,e.y+e.h/2);
+    if(e.type==='mushroom'){
+      ctx.fillStyle='#888899'; ctx.beginPath(); ctx.ellipse(0,8,12,10,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#556677'; ctx.beginPath(); ctx.arc(0,-2,16,Math.PI,0); ctx.fill();
+      ctx.fillStyle='#aabbcc';
+      ctx.beginPath(); ctx.arc(-4,-6,3,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(6,-8,2,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#222';
+      ctx.beginPath(); ctx.arc(-4,4,2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(4,4,2,0,Math.PI*2); ctx.fill();
+    } else if(e.type==='crow'){
+      ctx.fillStyle='#334455'; ctx.beginPath(); ctx.ellipse(0,0,14,10,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#223344';
+      ctx.beginPath(); ctx.ellipse(-12,-4,10,6,Math.PI*0.3,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(12,-4,10,6,-Math.PI*0.3,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#334455'; ctx.beginPath(); ctx.arc(0,-10,8,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#889955'; ctx.beginPath(); ctx.moveTo(8,-10); ctx.lineTo(14,-9); ctx.lineTo(8,-7); ctx.fill();
+      ctx.fillStyle='#ff4444'; ctx.beginPath(); ctx.arc(-1,-11,2.5,0,Math.PI*2); ctx.fill();
+    } else {
+      const boss=e.type==='boss';
+      if(boss) ctx.scale(1.4,1.4);
+      ctx.fillStyle=boss?'#aa00ff':'#334'; ctx.globalAlpha=0.88;
+      ctx.beginPath(); ctx.ellipse(0,0,14,18,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=boss?'#8800cc':'#223';
+      ctx.beginPath(); ctx.moveTo(-14,12); ctx.quadraticCurveTo(-8,22,-4,14);
+      ctx.quadraticCurveTo(0,24,4,14); ctx.quadraticCurveTo(8,22,14,12); ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.fillStyle=boss?'#ffee00':'#8888ff';
+      ctx.beginPath(); ctx.arc(-5,-4,3,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(5,-4,3,0,Math.PI*2); ctx.fill();
+      if(boss){ for(let hi=0;hi<e.hp;hi++){ctx.fillStyle='#ffee00';ctx.fillRect(-10+hi*8,-28,6,4);} }
+    }
+    ctx.restore();
+  });
+}
+
+function drawFlowers(){
+  flowers.forEach(f=>{
+    ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(f.spin);
+    tinyFlower(0,0,'#ff66bb',9); ctx.restore();
+  });
+}
+
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.globalAlpha=p.life; ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+}
+
+function drawHUD(){
+  // Blüten-Balken
+  ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(20,16,200,18,9); ctx.fill();
+  const bg=ctx.createLinearGradient(20,0,220,0);
+  bg.addColorStop(0,'#ff66cc'); bg.addColorStop(1,'#ffcc00');
+  ctx.fillStyle=bg; ctx.beginPath(); ctx.roundRect(22,18,196*(bloomProgress/100),14,7); ctx.fill();
+  ctx.fillStyle='white'; ctx.font='bold 11px Georgia'; ctx.fillText('🌸 Blüten-Zauber',25,30);
+  // Level
+  ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(CANVAS_W/2-90,12,180,24,8); ctx.fill();
+  ctx.fillStyle='#ffeeaa'; ctx.font='bold 13px Georgia';
+  ctx.textAlign='center'; ctx.fillText(levels[currentLevel].name,CANVAS_W/2,29); ctx.textAlign='left';
+  // Leben
+  for(let i=0;i<3;i++){
+    ctx.globalAlpha=i<luzi.lives?1:0.2;
+    ctx.font='22px serif'; ctx.fillText('🌸',CANVAS_W-100+i*28,36);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.font='10px Georgia';
+  ctx.fillText('← → Bewegen  ↑ Springen  ↓ Blume schießen',20,CANVAS_H-8);
+}
+
+function drawMenu(){
+  const gr=ctx.createLinearGradient(0,0,0,CANVAS_H);
+  gr.addColorStop(0,'#1a0a2e'); gr.addColorStop(1,'#0d1a0d');
+  ctx.fillStyle=gr; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  for(let i=0;i<25;i++){
+    ctx.fillStyle=`hsl(${(i*47+Date.now()*0.02)%360},80%,70%)`;
+    ctx.globalAlpha=0.5+Math.sin(Date.now()*0.003+i)*0.4;
+    ctx.beginPath(); ctx.arc(50+(i*73)%700,30+(i*47)%380,1.5,0,Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.save();
+  ctx.shadowColor='#ff88cc'; ctx.shadowBlur=30;
+  ctx.fillStyle='#fff'; ctx.font='bold 42px Georgia'; ctx.textAlign='center';
+  ctx.fillText('Luzi und der',CANVAS_W/2,130);
+  ctx.fillStyle='#ffccee'; ctx.font='bold 48px Georgia';
+  ctx.fillText('verwunschene Wald',CANVAS_W/2,185);
+  ctx.restore();
+  luzi.x=CANVAS_W/2-26; luzi.y=220; luzi.facing=1; luzi.knockedOut=0; luzi.invincible=0;
+  drawLuzi();
+  ctx.fillStyle='rgba(255,220,255,0.85)'; ctx.font='14px Georgia'; ctx.textAlign='center';
+  ctx.fillText('Der Wald ist verwunschen! Nur Luzi kann ihn',CANVAS_W/2,310);
+  ctx.fillText('mit ihren Zauberblumen retten! 🌸',CANVAS_W/2,330);
+  ctx.fillStyle=`rgba(255,255,100,${0.5+Math.sin(Date.now()*0.004)*0.5})`;
+  ctx.font='bold 18px Georgia';
+  ctx.fillText('[ ENTER ] — Abenteuer beginnen!',CANVAS_W/2,390);
+  ctx.textAlign='left';
+}
+
+function drawOverlay(title,sub,hint,col='#ffeecc'){
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=40; ctx.fillStyle=col;
+  ctx.font='bold 52px Georgia'; ctx.textAlign='center';
+  ctx.fillText(title,CANVAS_W/2,CANVAS_H/2-30); ctx.restore();
+  ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.font='20px Georgia'; ctx.textAlign='center';
+  ctx.fillText(sub,CANVAS_W/2,CANVAS_H/2+20);
+  ctx.fillStyle=`rgba(255,255,100,${0.5+Math.sin(Date.now()*0.004)*0.5})`;
+  ctx.font='16px Georgia'; ctx.fillText(hint,CANVAS_W/2,CANVAS_H/2+60); ctx.textAlign='left';
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────────
+let lastTime=0;
+function loop(ts){
+  const dt=Math.min((ts-lastTime)/16.67,3); lastTime=ts;
+  ctx.clearRect(0,0,CANVAS_W,CANVAS_H);
+
+  if(gameState===STATE.MENU){ drawMenu(); }
+  else if(gameState===STATE.PLAYING||gameState===STATE.LEVEL_COMPLETE){
+    if(gameState===STATE.PLAYING){ updateLuzi(dt); updateEnemies(dt); updateFlowers(dt); }
+    updateParticles();
+    drawBG(); drawPlatforms(); drawEnemies(); drawFlowers(); drawLuzi(); drawParticles(); drawHUD();
+    if(gameState===STATE.LEVEL_COMPLETE)
+      drawOverlay('🌸 Erblüht! 🌸',
+        currentLevel<levels.length-1?`Weiter: "${levels[currentLevel+1]?.name}"`:'Der Wald erwacht!',
+        '[ ENTER ] — Weiter','#ffccee');
+  }
+  else if(gameState===STATE.GAME_OVER){
+    drawBG(); drawPlatforms(); drawLuzi(); drawHUD();
+    drawOverlay('😢 Ohnmächtig!','Luzi braucht eine Pause...','[ ENTER ] — Nochmal versuchen','#ffaaaa');
+  }
+  else if(gameState===STATE.WIN){
+    const t=Date.now()*0.001;
+    for(let i=0;i<CANVAS_H;i+=4){ctx.fillStyle=`hsl(${(i+t*30)%360},70%,30%)`;ctx.fillRect(0,i,CANVAS_W,4);}
+    if(Math.random()<0.3) spawnP(Math.random()*CANVAS_W,Math.random()*CANVAS_H/2,5,['#ff88cc','#ffcc00','#aaffaa','#88ccff'][Math.floor(Math.random()*4)],4);
+    updateParticles(); drawParticles();
+    ctx.save(); ctx.shadowColor='#ffff00'; ctx.shadowBlur=50; ctx.fillStyle='#fffacc';
+    ctx.font='bold 44px Georgia'; ctx.textAlign='center';
+    ctx.fillText('🌺 Der Wald erblüht! 🌺',CANVAS_W/2,160); ctx.restore();
+    ctx.fillStyle='rgba(255,240,255,0.95)'; ctx.font='18px Georgia'; ctx.textAlign='center';
+    ctx.fillText('Luzi hat alle Wächter besiegt!',CANVAS_W/2,215);
+    ctx.fillText('Der verwunschene Wald ist für immer gerettet.',CANVAS_W/2,245);
+    ctx.fillText('🐘 Luzi tanzt vor Freude! 🌸',CANVAS_W/2,280);
+    ctx.fillStyle=`rgba(255,255,100,${0.5+Math.sin(Date.now()*0.004)*0.5})`;
+    ctx.font='bold 16px Georgia'; ctx.fillText('[ ENTER ] — Von vorne spielen',CANVAS_W/2,370); ctx.textAlign='left';
+  }
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
