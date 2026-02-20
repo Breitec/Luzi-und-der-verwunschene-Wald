@@ -1,4 +1,4 @@
-# 🐘🌸 Mein Spiel: Luzi und der verwunschene Wald! 🌸🐘
+# 🐘🌸Mein Spiel: Luzi und der verwunschene Wald!🌸🐘
 
 Hallo!! Ich heiße Luisa und ich bin 7 Jahre alt. 🎀
 
